@@ -2,7 +2,7 @@
 To clean things up a bit I've moved the exe whitelist out to a text file that is created next to the script.
 If you were using the old version you will need to migrate your existing list manually using the examples provided.
 
-##New feature: Add/remove programs via the script window
+## New feature: Add/remove programs via the script window
 Use the a or r keys at any time to add or remove programs from the whitelist.
 
 Adding programs is now super easy. Start the program, then press the a key in the script window and it should be index 0 since it sorts by the most recent process start.
@@ -22,5 +22,6 @@ If you want the script to auto-run on startup you can achieve this with a task i
 
 
 The script works by overwriting the registry value that stores the list of valid advanced colour profiles for a given monitor then applying the change via a built-in windows task in the task scheduler.
+
 
 If anyone has the knowhow to make this more user friendly then please do. I do not have the experience required and it would take me weeks to make a GUI of some kind.
