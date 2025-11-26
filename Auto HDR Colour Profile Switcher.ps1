@@ -1,11 +1,24 @@
 # Enter each exe name here but WITHOUT the ".exe" part
-$programWhitelist = @(
-	'ManorLords-WinGDK-Shipping'
-	'Everspace2'
-	'HorizonForbiddenWest'
-	'notepad++'
-)
+# $programWhitelist = @(
+	# 'ManorLords-WinGDK-Shipping'
+	# 'Everspace2'
+	# 'HorizonForbiddenWest'
+	# 'witcher3'
+	# 'notepad++'
+	# 'FactoryGameSteam-Win64-Shipping'
+	# 'ffxvi'
+	# 'ffxiv_dx11'
+	# 'ff7remake_'
+	# 'BattlefleetGothic2-Win64-Shipping'
+	# 'DOOMTheDarkAges'
+	# 'eldenring'
+	# 'TheGreatCircle'
+	# 'SandFall-Win64-Shipping'
+# )
 
+
+
+$programWhitelist = Get-Content ($PSScriptRoot + "\autoHDRColourProfileSwitcherWhitelist.txt")
 
 
 
@@ -20,9 +33,9 @@ $numOfHDRMonitors = 3
 # You can delete everything inside the "Display" key at the following registry path to clear all your current colour management settings and start 
 # again. This will make it easier to find the currently used key group. The current key group will regenerate as soon as you open the colour management
 # panel in windows again.
-# THIS WILL FULLY CLEAR ALL COLOUR PROFILES FROM ALL MONITORS. Though the actual profile files won't be deleted so you can just re-add them in the 
+# THIS WILL FULLY CLEAR ALL COLOUR PROFILE SETTINGS FROM ALL MONITORS. Though the actual profile files won't be deleted so you can just re-add them in the 
 # colour management panel
-# If you don't want that, then see the $registryDisplayKey1 comment for how to find the correct group another way using the individial display.
+# If you don't want that, then see the $registryDisplayKey1 comment for how to find the correct group another way using the individiual display.
 $registryPrePath = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\ICM\ProfileAssociations\Display\'
 
 # Once you have regenerated the display grouping enter the long string here. It may stop working at some point if windows decides to make a new one
@@ -32,12 +45,12 @@ $registryDisplayGroupKey = '{4d36e96e-e325-11ce-bfc1-08002be10318}'
 # To find the individual monitor key you can refresh the registry while toggling "use my settings for this device" on the intended monitor in the 
 # colour management panel. This will change the entry in the registry called "UsePerUserProfiles". Note that you will need to refresh the registry
 # using F5 or the view menu as it is not dynamic.
-$registryDisplayKey1 = '0011'
+$registryDisplayKey1 = '0006'
 
 # keys for more displays
-$registryDisplayKey2 = '0007'
-$registryDisplayKey3 = '0001'
-$registryDisplayKey4 = '0004'
+$registryDisplayKey2 = '0006'
+$registryDisplayKey3 = '0004'
+$registryDisplayKey4 = '0002'
 
 
 
@@ -62,7 +75,10 @@ $SDRProfileName4 = 'B30.icm'
 
 
 #Delay in seconds between process scans whenever a process is terminated. This helps limit the CPU usage.
-$processCheckDelay = 5
+$processCheckDelay = 1
+
+#Timeout value for which to run the main loop if an event hasn't triggered
+$mainLoopTimeout = 0.1
 
 # Show windows notification on colour profile change
 # Use $true or $false because that's how powershell works
@@ -72,7 +88,6 @@ $enableNotifications = $false
 
 
 # END OF USER SETTINGS
-
 
 
 
@@ -140,8 +155,16 @@ function New-ProcessEvent {
 	Write-Host "registered new start event for process:" $procname
 }
 
+function Delete-ProcessEvent {
+	param (
+        $procName
+    )
+	Unregister-Event -SourceIdentifier $procName
+	Write-Host "Unregistered start event for process:" $procname
+}
+
 function CheckProcesses {
-	[Console]::WriteLine("Checking active processes")
+	# [Console]::WriteLine("Checking active processes")
 	$processNames = Get-Process | Select-Object -ExpandProperty ProcessName
 	$active = Compare-Object -ReferenceObject $programWhitelist -DifferenceObject $processNames -ExcludeDifferent -IncludeEqual | Select-Object -ExpandProperty InputObject
 	Write-Output $active
@@ -196,6 +219,66 @@ function GetUnixTime {
 	Write-Output $UnixTimeStamp	
 }
 
+function ManualProgramCheck {
+	$processNames = Get-Process | Select-Object -ExpandProperty ProcessName
+	$active = Compare-Object -ReferenceObject $programWhitelist -DifferenceObject $processNames -ExcludeDifferent -IncludeEqual | Select-Object -ExpandProperty InputObject
+
+	if ($active.length -eq 0){
+		setSDRProfile
+	}
+	else {
+		SetHDRProfile
+	}
+}
+
+function AddToWhitelist {
+	$procs = Get-Process | ? {$_.mainwindowtitle.length -ne 0}
+	$list = [System.Collections.Generic.List[Object]]::new()
+
+	foreach ($p in $procs) {
+		if ($p.StartTime) {
+			$list.Add($p)
+		}
+	}
+	$sorted = $list | Sort-Object -Property @{Expression = "StartTime"; Descending = $true}
+	$count = 0
+	foreach ($s in $sorted)	{
+		$s | add-member -passthru SelectIndex ($count++) | Out-Null
+	}
+	$sorted | Format-Table SelectIndex, ProcessName, mainwindowtitle
+	
+	$userSelection = Read-Host "Index of program to add"
+	
+	$program = $sorted | Where-Object { $_.SelectIndex -eq $userSelection}
+	$program.ProcessName | Out-File -Append -Encoding utf8 -FilePath ($PSScriptRoot + "\autoHDRColourProfileSwitcherWhitelist.txt")
+	
+	$global:programWhitelist = Get-Content ($PSScriptRoot + "\autoHDRColourProfileSwitcherWhitelist.txt")
+	New-ProcessEvent -procName $program.ProcessName
+	ManualProgramCheck
+}
+
+function RemoveFromWhitelist {
+	$list = [System.Collections.Generic.List[Object]]::new()
+	$i = 0
+	foreach ($p in $programWhitelist)	{
+		$obj = [PSCustomObject]@{
+			index = $i++
+			name = $p			
+		}
+		$list.Add($obj)
+	}
+	$list | Format-Table index, name
+	
+	$userSelection = Read-Host "Index of program to remove"
+	$pname = $list | Where-Object { $_.index -eq $userSelection}
+	
+	$global:programWhitelist = $global:programWhitelist | Where-Object { $_ -ne $pname.name}
+	$global:programWhitelist | Out-File -Encoding utf8 -FilePath ($PSScriptRoot + "\autoHDRColourProfileSwitcherWhitelist.txt")
+	
+	Delete-ProcessEvent($pname.name)
+	
+	ManualProgramCheck
+}
 
 function start-init {
 
@@ -211,29 +294,43 @@ function start-init {
 
 
 	[Console]::WriteLine("Checking active processes")
-	$processNames = Get-Process | Select-Object -ExpandProperty ProcessName
-	$active = Compare-Object -ReferenceObject $programWhitelist -DifferenceObject $processNames -ExcludeDifferent -IncludeEqual | Select-Object -ExpandProperty InputObject
-
-
-	if ($active.length -eq 0){
-		setSDRProfile
-	}
-	else {
-		SetHDRProfile
-	}
+	ManualProgramCheck
 	
 	$lastTime = GetUnixTime - $processCheckDelay
 
 	[Console]::WriteLine("Startup Complete")
-
+	[Console]::WriteLine("")
+	[Console]::WriteLine("List of keybinds:")
+	[Console]::WriteLine(" a    Add a program to the HDR whitelist")
+	[Console]::WriteLine(" r    Remove a program from the HDR whitelist")
+	[Console]::WriteLine("")
 }
+
 
 
 start-init
 
 while($true)
 {
-	Wait-Event -Timeout $processCheckDelay > $null
+	# wait until event OR timeout
+	Wait-Event -Timeout $mainLoopTimeout > $null
+
+
+    if ([Console]::KeyAvailable) {
+        # reads the first key in the buffer that was pressed during sleep    
+        $keypressed = [Console]::ReadKey("NoEcho").Key
+        # clears the the buffer if more than one key was pressed during sleep
+        while ([Console]::KeyAvailable) {
+            $null = [Console]::ReadKey("NoEcho")
+        }		
+		if ($keypressed -eq "a") {
+			AddToWhitelist
+		}
+		elseif ($keypressed -eq "r") {
+			RemoveFromWhitelist
+		}
+    }
+
 	
 	# if no event, check if scan is queued
 	$events = Get-Event
@@ -285,5 +382,6 @@ while($true)
 	}
 
 	Remove-Event -EventIdentifier $currEvent.EventIdentifier
-	
+		
 }
+
